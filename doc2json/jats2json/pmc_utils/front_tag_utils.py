@@ -80,8 +80,11 @@ def parse_pubmed_id_tag(front_tag) -> Optional[str]:
 
 
 def parse_pmc_id_tag(front_tag) -> str:
-    return f"PMC{front_tag.find('article-id', {'pub-id-type': 'pmc'}).extract().text}"
-
+    pmcid_tag = front_tag.find('article-id', {'pub-id-type': 'pmc'})
+    if pmcid_tag is None:
+        return None
+    else:
+        return pmcid_tag.extract().text
 
 def parse_doi_tag(front_tag) -> Optional[str]:
     """Not all papers have a DOI"""
@@ -231,7 +234,7 @@ def parse_funding_groups(front_tag) -> List[str]:
                 # what if something already in 'name'?  observed it's typically empty string; so ignore.
                 if not out['name']:
                     out['name'] = text
-            
+
             # if DOI link is in the name, remove it and parse (PMC5407128)
             if out['name'] and not out['doi']:
                 pattern = r'\s*http(s?)://dx.doi.org/(.+)$'
@@ -367,15 +370,9 @@ def parse_abstract_tag(front_tag, soup) -> List[Dict]:
         # replace all sup/sub tags with string placeholders
         replace_sup_sub_tags_with_string_placeholders(soup_tag=abstract_tag, soup=soup)
 
-        if abstract_tag.find('sec'):
-            all_par_blobs = []
-            for sec_tag in abstract_tag.find_all('sec', recursive=False):
-                par_blobs = recurse_parse_section(sec_tag=sec_tag)
-                all_par_blobs.extend(par_blobs)
-        else:
-            all_par_blobs = parse_all_paragraphs_in_section(sec_tag=abstract_tag)
-            for par_blob in all_par_blobs:
-                # these 'sections' typically show up as empty string
-                par_blob['section'] = 'Abstract'
-                abstract.append(par_blob)
+        abstract = recurse_parse_section(sec_tag=abstract_tag)
+        for par_blob in abstract:
+            # these 'sections' typically show up as empty string
+            par_blob['section'] = 'Abstract'
+
     return abstract

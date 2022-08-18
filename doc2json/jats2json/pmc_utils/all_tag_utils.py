@@ -31,10 +31,7 @@ def replace_sup_sub_tags_with_string_placeholders(soup_tag, soup):
         sub_tag.replace_with(soup.new_string(f"&!start&{sub_tag.text}&!end&"))
 
 
-def recurse_parse_section(
-    sec_tag,
-    # suppl_blobs: Dict
-) -> List[Dict]:
+def recurse_parse_section(sec_tag) -> List[Dict]:
     """Recursive function for getting paragraph blobs to look like
         {
             'text': ...,
@@ -43,28 +40,38 @@ def recurse_parse_section(
         }
     """
     subsections = sec_tag.find_all("sec", recursive=False)
-    if not subsections:
-        return parse_all_paragraphs_in_section(
-            sec_tag=sec_tag
-        )  # , suppl_blobs=suppl_blobs)
-    else:
-        outputs = []
-        for child in subsections:
-            child_blobs = recurse_parse_section(
-                sec_tag=child
-            )  # , suppl_blobs=suppl_blobs)
-            for blob in child_blobs:
-                # PMC373254 - process blob['section'] to remove any span markers left in there
-                for t in ALL_TOKENS:
-                    blob['section'] = blob['section'].replace(t, '')
-                blob["section"] = blob["section"] + " :: " + sec_tag.find("title").text
-            outputs.extend(child_blobs)
-        return outputs
+
+    outputs = []
+
+    for _ in subsections:
+        sec_tag.sec.extract()
+    current_node_blobs = parse_all_paragraphs_in_section(sec_tag=sec_tag)
+    for blob in current_node_blobs:
+        for t in ALL_TOKENS:
+            blob['section'] = blob['section'].replace(t, '')
+    outputs.extend(current_node_blobs)
+
+    for child in subsections:
+        # note; most sections dont have this 'sec-type' attribute
+        if child.get('sec-type') == 'supplementary-material':
+            # hopefully all the important supplementary content already extracted above in previous step
+            continue
+        child_blobs = recurse_parse_section(sec_tag=child)
+        for blob in child_blobs:
+            # PMC373254 - process blob['section'] to remove any span markers left in there
+            for t in ALL_TOKENS:
+                blob['section'] = blob['section'].replace(t, '')
+            title = sec_tag.find("title", recursive=False)
+            if title:
+                blob["section"] = blob["section"] + " :: " + title.text
+        outputs.extend(child_blobs)
+
+    return outputs
 
 
 def _reduce_args(stack: List, end_token: str) -> List[List]:
     """Helper function for `_parse_all_paragraphs_in_section`.
-    
+
     Pop arguments for the xref off the top of the stack and return a list of argument lists,
     where the outer lists represent groups divided by separators."""
     start_token = end_token.replace('end', 'start')
@@ -81,16 +88,16 @@ def _reduce_args(stack: List, end_token: str) -> List[List]:
 
 
 def _add_spans(
-    end_token: str,
-    start_pos: int,
-    text: str,
-    ref_id,
-    ref_type,
-    cite_spans: List,
-    fig_spans: List,
-    table_spans: List,
-    sup_spans: List,
-    sub_spans: List,
+        end_token: str,
+        start_pos: int,
+        text: str,
+        ref_id,
+        ref_type,
+        cite_spans: List,
+        fig_spans: List,
+        table_spans: List,
+        sup_spans: List,
+        sub_spans: List,
 ):
     """Helper function used by `_parse_all_paragraphs_in_section`."""
     if end_token.startswith("#"):  # process xref
@@ -121,7 +128,7 @@ def _add_spans(
 
 
 def get_latex_from_formula(
-    formula_tag
+        formula_tag
 ):
     if formula_tag.find('tex-math'):
         latex_text = formula_tag.find('tex-math').text
@@ -132,7 +139,7 @@ def get_latex_from_formula(
 
 
 def get_mathml_from_formula(
-    formula_tag
+        formula_tag
 ):
     if formula_tag.find('mml:math'):
         return str(formula_tag.find('mml:math'))
@@ -140,9 +147,9 @@ def get_mathml_from_formula(
 
 
 def parse_formulas(
-    para_el,
-    sp,
-    replace
+        para_el,
+        sp,
+        replace
 ):
     # sub and get corresponding spans of inline formulas
     formula_dict = dict()
@@ -176,9 +183,9 @@ def parse_formulas(
 
 
 def parse_all_paragraphs_in_section(
-    sec_tag,
-    par_to_text: Callable = None,
-    replace_formula=True
+        sec_tag,
+        par_to_text: Callable = None,
+        replace_formula=True
 ) -> List[Dict]:
     """Internal function. Assumes section has no nested tags
     `par_to_text` is an optional function that converts the `par` tag into a string.  by default, calls `par_tag.text`.
@@ -262,7 +269,7 @@ def parse_all_paragraphs_in_section(
         full_text = "".join(full_text)
         assert pos == len(full_text)
 
-        title = sec_tag.find("title")
+        title = sec_tag.find("title", recursive=False)
         title = title.text if title else ""
 
         # get all equation spans

@@ -74,28 +74,17 @@ def process_body_tag(body_tag, soup) -> Dict:
     # replace all sup/sub tags with string placeholders
     replace_sup_sub_tags_with_string_placeholders(soup_tag=body_tag, soup=soup)
 
-    # some articles (like PMC2844102) have no sections
-    sec_tags = body_tag.find_all('sec', recursive=False)
+    blob = body_tag
 
     # try looking in article tag
-    if not sec_tags:
+    if not body_tag.find('sec', recursive=False):
         try:
-            sec_tags = body_tag.article.find_all('sec', recursive=False)
+            body_tag.article.find('sec', recursive=False)
+            blob = body_tag.article
         except:
             pass
 
-    if sec_tags:
-        all_par_blobs = []
-        for sec_tag in sec_tags:
-            # note; most sections dont have this 'sec-type' attribute
-            if sec_tag.get('sec-type') == 'supplementary-material':
-                # hopefully all the important supplementary content already extracted above in previous step
-                continue
-            else:
-                par_blobs = recurse_parse_section(sec_tag=sec_tag)
-                all_par_blobs.extend(par_blobs)
-    else:
-        all_par_blobs = parse_all_paragraphs_in_section(body_tag)
+    all_par_blobs = recurse_parse_section(sec_tag=blob)
 
     return {
         'body_text': all_par_blobs,
@@ -224,7 +213,8 @@ def convert_jats_xml_to_s2orc_json(jats_file: str, log_dir: str):
 
     # read JATS XML
     with open(jats_file, 'r') as f_in:
-        soup = BeautifulSoup(f_in, 'lxml')
+        soup = BeautifulSoup(f_in, 'xml')
+
         destroy_unimportant_tags_inplace(soup, tags_to_remove=['bold', 'italic', 'graphic'])
 
     # all the XML files have their own wonky reference IDs.  we want to standardize them, but need to remember the old->new mapping
@@ -294,6 +284,7 @@ def convert_jats_xml_to_s2orc_json(jats_file: str, log_dir: str):
 
     # BODY TAGS
     body_tag = soup.find('body')
+
     # PMC1240684 doesnt have 'body' tag
     if body_tag is not None:
         body_dict = process_body_tag(body_tag=body_tag, soup=soup)
@@ -329,13 +320,14 @@ def convert_jats_xml_to_s2orc_json(jats_file: str, log_dir: str):
 
 
 if __name__ == '__main__':
-    jats_file = 'tests/jats/PMC5828200.nxml'
+    jats_file = 'PMC193605.xml'
+    # jats_file = 'PMC1636491.xml'
+    #jats_file = 'PMC212689.xml'
     paper = convert_jats_xml_to_s2orc_json(jats_file, 'logs')
 
-    jats_file = 'tests/jats/PMC6398430.nxml'
-    paper = convert_jats_xml_to_s2orc_json(jats_file, 'logs')
 
-    jats_file = 'tests/jats/PMC7417471.nxml'
-    paper = convert_jats_xml_to_s2orc_json(jats_file, 'logs')
+    # write to file
+    with open("output_file", 'w') as outf:
+        json.dump(paper.release_json("jats"), outf, indent=4, sort_keys=False)
 
     print('done.')
