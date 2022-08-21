@@ -79,7 +79,7 @@ def parse_pubmed_id_tag(front_tag) -> Optional[str]:
         return pmid_tag.extract().text
 
 
-def parse_pmc_id_tag(front_tag) -> str:
+def parse_pmc_id_tag(front_tag) -> Optional[str]:
     pmcid_tag = front_tag.find('article-id', {'pub-id-type': 'pmc'})
     if pmcid_tag is None:
         return None
@@ -94,6 +94,28 @@ def parse_doi_tag(front_tag) -> Optional[str]:
     else:
         return None
 
+def parse_issn_tag(front_tag) -> Optional[str]:
+    issn_txt = ""
+    for issn_tag in front_tag.find_all('issn'):
+        issn_txt = issn_tag.extract().text
+    if issn_txt == "":
+        return None
+    else:
+        return issn_txt
+
+def parse_volume_tag(front_tag) -> Optional[str]:
+    volume_tag = front_tag.find('volume')
+    if volume_tag is not None:
+        return volume_tag.extract().text
+    else:
+        return None
+
+def parse_issue_tag(front_tag) -> Optional[str]:
+    issue_tag = front_tag.find('issue')
+    if issue_tag is not None:
+        return issue_tag.extract().text
+    else:
+        return None
 
 def parse_title_tag(front_tag) -> str:
     """
@@ -172,15 +194,13 @@ def parse_date_tag(front_tag) -> Dict:
     out = {}
     for pub_date in front_tag.find_all('pub-date'):
         year = pub_date.find('year')
-        month = pub_date.find('month')
-        day = pub_date.find('day')
-        out[pub_date.get('pub-type', 'MISSING_PUB_TYPE')] = '-'.join([tag.text for tag in [year, month, day] if tag is not None])
+        if year is not None:
+            out[pub_date.get('pub-type', 'MISSING_PUB_TYPE')] = year.text
         pub_date.decompose()
     for date in front_tag.find_all('date'):
         year = date.find('year')
-        month = date.find('month')
-        day = date.find('day')
-        out[date.get('date-type', 'MISSING_DATE_TYPE')] = '-'.join([tag.text for tag in [year, month, day] if tag is not None])
+        if year is not None:
+            out[date.get('date-type', 'MISSING_DATE_TYPE')] = year.text
         date.decompose()
     return out
 

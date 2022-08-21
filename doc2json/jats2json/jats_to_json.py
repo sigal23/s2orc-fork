@@ -2,7 +2,7 @@
 Mostly copied from cite2vec paper_parsing.parse_nxml
 """
 
-from typing import List, Set, Dict, Callable
+from typing import List, Set, Dict, Callable, Union, Iterator
 
 import os
 import json
@@ -13,10 +13,12 @@ from tqdm import tqdm
 from glob import glob
 from pprint import pprint
 
+from multi_paragraph_input_document import SectionTitle, Paragraph
+
 from doc2json.utils.soup_utils import destroy_unimportant_tags_inplace
 from doc2json.jats2json.pmc_utils.front_tag_utils import parse_journal_id_tag, parse_journal_name_tag, \
     parse_title_tag, parse_category_tag, parse_date_tag, parse_doi_tag, parse_pmc_id_tag, parse_pubmed_id_tag, \
-    parse_authors, parse_affiliations, parse_abstract_tag, parse_funding_groups, NoAuthorNamesError
+    parse_authors, parse_affiliations, parse_abstract_tag, parse_funding_groups, NoAuthorNamesError, parse_issn_tag, parse_volume_tag, parse_issue_tag
 from doc2json.jats2json.pmc_utils.extract_utils import extract_fig_blobs, extract_table_blobs, extract_suppl_blobs
 from doc2json.jats2json.pmc_utils.all_tag_utils import replace_xref_with_string_placeholders, \
     replace_sup_sub_tags_with_string_placeholders, recurse_parse_section
@@ -34,6 +36,9 @@ def process_front_tag(front_tag, soup) -> Dict:
     # process <article-meta> tags
     title: str = parse_title_tag(front_tag=front_tag)
 
+    issn: str = parse_issn_tag(front_tag=front_tag)
+    volume: str = parse_volume_tag(front_tag=front_tag)
+    issue: str = parse_issue_tag(front_tag=front_tag)
     try:
         authors: List[Dict] = parse_authors(front_tag=front_tag)
     except NoAuthorNamesError:
@@ -53,6 +58,9 @@ def process_front_tag(front_tag, soup) -> Dict:
     funding_groups: List[str] = parse_funding_groups(front_tag=front_tag)
 
     return {
+        'issn': issn,
+        'volume': volume,
+        'issue': issue,
         'title': title,
         'abstract': abstract,
         'authors': authors,
@@ -173,7 +181,7 @@ def convert_acks_to_s2orc(paragraphs: List) -> List[Dict]:
     return paragraphs
 
 
-def convert_paragraphs_to_s2orc(paragraphs: List, old_to_new: Dict) -> List[Dict]:
+def convert_paragraphs_to_s2orc(paragraphs: List, old_to_new: Dict):  #-> List[Dict]:
     """
     Convert paragraphs into S2ORC format
     """
@@ -229,6 +237,8 @@ def convert_jats_xml_to_s2orc_json(jats_file: str, log_dir: str):
     #       also, S2ORC table captions are free text without detected reference/citation mentions
     # TODO: may want to keep table representations around
     ref_entries = {}
+    tables_texts = []
+    figures_texts = []
     for i, (old_table_key, table_blob) in enumerate(sorted(table_blobs.items())):
         # TODO: PMC2557072 table `tbl5` has no label.  skip.
         # TODO: PMC3137981 table `tab1` has no caption text.  skip.
@@ -243,6 +253,7 @@ def convert_jats_xml_to_s2orc_json(jats_file: str, log_dir: str):
         if table_blob['xml']:
             table_content = table_blob['xml'][0]['text']
         ref_entries[new_table_key] = {'text': table_text, 'content': table_content, 'type': 'table'}
+        tables_texts.append(table_text)
     for i, (old_figure_key, figure_blob) in enumerate(sorted(figure_blobs.items())):
         # TODO: double-check, but it seems like figure blobs dont have footnotes parsed out? might be bug
         # TODO: PMC1326260 first figure has no ['label'].  just skip these for now (because no inline references)
@@ -253,6 +264,7 @@ def convert_jats_xml_to_s2orc_json(jats_file: str, log_dir: str):
         new_figure_key = f'FIGREF{i}'
         old_key_to_new_key[old_figure_key] = new_figure_key
         ref_entries[new_figure_key] = {'text': figure_text, 'type': 'figure'}
+        figures_texts.append(figure_text)
 
     # FRONT TAGS
     front_tag = soup.find('front').extract()
@@ -293,7 +305,7 @@ def convert_jats_xml_to_s2orc_json(jats_file: str, log_dir: str):
         # Has no body: /disk2/gorpus/20200101/pmc/Br_Foreign_Med_Chir_Rev/PMC5163425.nxml
         body_text = []
 
-    body_text = convert_paragraphs_to_s2orc(body_text, old_key_to_new_key)
+    # body_text = convert_paragraphs_to_s2orc(body_text, old_key_to_new_key)
 
     metadata = {
         "title": front_dict['title'],
@@ -306,28 +318,71 @@ def convert_jats_xml_to_s2orc_json(jats_file: str, log_dir: str):
             "pmc_id": front_dict['pmc_id']
         }
     }
+    #
+    # return Paper(
+    #     paper_id=file_id,
+    #     pdf_hash="",
+    #     metadata=metadata,
+    #     abstract=front_dict['abstract'],
+    #     body_text=body_text,
+    #     back_matter=back_dict.get('acknowledgements', []),
+    #     bib_entries=bib_entries,
+    #     ref_entries=ref_entries
+    # )
 
-    return Paper(
-        paper_id=file_id,
-        pdf_hash="",
-        metadata=metadata,
-        abstract=front_dict['abstract'],
-        body_text=body_text,
-        back_matter=back_dict.get('acknowledgements', []),
-        bib_entries=bib_entries,
-        ref_entries=ref_entries
-    )
+    authors = []
+    for a in front_dict['authors']:
+        last_name = a["last"]
+        first_name = a["first"]
+        authors.append(f"{last_name}, {first_name}")
+
+    extra: Dict[str, MetadataValue] = {
+        "issn": front_dict['issn'],
+        "volume": front_dict['volume'],
+        "issue": front_dict['issue'],
+        "journal_title": front_dict['journal_name'],
+        "filename": "",
+        "pmid": front_dict['pubmed_id'],
+        "year": front_dict['year'],
+        "pmcid": front_dict['pmc_id'],
+        "doi": front_dict['doi'],
+        "tables_texts": tables_texts,
+        "figures_texts": figures_texts
+    }
+    abstract_body_content = front_dict['abstract'] + body_text
+
+    content: List[Union[Paragraph, SectionTitle]] = []
+
+    section_added = set()
+    section_title_prev = ""
+    for p in abstract_body_content:
+        section_nesting: list(str) = p['section'].split(" :: ")
+        nesting_level = len(section_nesting)
+        if nesting_level > 0:
+            section_title_curr = section_nesting.pop(0)
+            for count, sec in enumerate(reversed(section_nesting), start=1):
+                if sec not in section_added:
+                    content.append(SectionTitle(name=sec, nesting=count))
+                    section_added.add(sec)
+            if len(section_title_curr) > 0 and section_title_curr != section_title_prev:
+                content.append(SectionTitle(name=section_title_curr, nesting=nesting_level))
+                section_added.add(section_title_curr)
+                section_title_prev = section_title_curr
+        content.append(Paragraph(text=p['text'], entities=[]))
+
+    return front_dict['pubmed_id'], front_dict['title'], content, extra, authors, front_dict['year']
 
 
 if __name__ == '__main__':
-    jats_file = 'PMC193605.xml'
-    # jats_file = 'PMC1636491.xml'
-    #jats_file = 'PMC212689.xml'
-    paper = convert_jats_xml_to_s2orc_json(jats_file, 'logs')
+    #jats_file = 'PMC193605.xml'
+    #jats_file = 'PMC1636491.xml'
+    jats_file = 'PMC212689.xml'
+    # paper = convert_jats_xml_to_s2orc_json(jats_file, 'logs')
 
-
+    pmid, title, content, extra, authors, year = convert_jats_xml_to_s2orc_json(jats_file, 'logs')
+    print(pmid, title, content, extra, authors, year)
     # write to file
-    with open("output_file", 'w') as outf:
-        json.dump(paper.release_json("jats"), outf, indent=4, sort_keys=False)
+    # with open("output_file", 'w') as outf:
+    #     json.dump(paper.release_json("jats"), outf, indent=4, sort_keys=False)
 
     print('done.')
